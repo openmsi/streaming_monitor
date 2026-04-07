@@ -1,3 +1,9 @@
+report.txt
+*.png
+*.csv
+consumer_logs/
+producer_logs/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
