@@ -10,7 +10,7 @@ Usage:
         --consumer-logs ./consumer_logs \\
         --girder-api-url https://girder.htmdec.org/api/v1 \\
         --girder-api-key <key> \\
-        --girder-folder-id <folder_id> \\
+        --topic-name aimdl-lasershock-otherdata \\
         [--report report.txt] \\
         [--png pipeline_status.png]
 """
@@ -155,22 +155,19 @@ def load_consumer_logs(consumer_dir):
     return df.drop_duplicates("filename")
 
 
-def get_girder_filenames(api_url, api_key, folder_id):
+def get_girder_filenames(api_url, api_key, topic_name):
+    import json
+
     client = GirderClient(apiUrl=api_url)
     client.authenticate(apiKey=api_key)
-
-    names = set()
-
-    def _collect(fid):
-        items = client.get("item", parameters={"folderId": fid, "limit": 100000})
-        for item in items:
-            names.add(item["name"])
-        subfolders = client.get("folder", parameters={"parentType": "folder", "parentId": fid, "limit": 100000})
-        for folder in subfolders:
-            _collect(folder["_id"])
-
-    _collect(folder_id)
-    return names
+    items = client.get(
+        "item/query",
+        parameters={
+            "query": json.dumps({"meta.KafkaTopic": topic_name}),
+            "limit": 100000,
+        },
+    )
+    return {item["name"] for item in items}
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +469,7 @@ def main():
     parser.add_argument("--girder-api-url", default=None, help="Girder API base URL")
     parser.add_argument("--girder-api-key", default=None, help="Girder API key")
     parser.add_argument(
-        "--girder-folder-id", default=None, help="Girder folder ID to check"
+        "--topic-name", default=None, help="Kafka topic name (filters Girder items by meta.KafkaTopic)"
     )
     parser.add_argument(
         "--report", default="report.txt", help="Output path for text report"
@@ -495,11 +492,11 @@ def main():
         drop=True
     )
 
-    if args.girder_api_url and args.girder_folder_id:
+    if args.girder_api_url and args.topic_name:
         print("Checking Girder...")
         try:
             girder_files = get_girder_filenames(
-                args.girder_api_url, args.girder_api_key, args.girder_folder_id
+                args.girder_api_url, args.girder_api_key, args.topic_name
             )
             merged["on_girder"] = merged["filename"].isin(girder_files)
             print(f"  {len(girder_files)} files found on Girder")
