@@ -266,11 +266,14 @@ def generate_report(merged, output_path):
     for heading, df in problems.items():
         if not df.empty:
             any_problems = True
+            df = df.sort_values("produced_start", ascending=False, na_position="last")
             L(DIV)
-            L(f"{heading}  ({len(df)})")
+            L(f"{heading}  ({len(df)})  — most recent first")
             L(DIV)
             for _, row in df.iterrows():
-                L(f"  {row['filename']}")
+                ts = row["produced_start"]
+                ts_str = ts.strftime("%Y-%m-%d %H:%M") if pd.notna(ts) else "unknown time"
+                L(f"  [{ts_str}]  {row['filename']}")
             L("")
 
     if not any_problems:
@@ -295,12 +298,12 @@ def generate_report(merged, output_path):
 
 def generate_png(merged, output_path):
     total = len(merged)
-    # Only show files with at least one issue
+    # Only show files with at least one issue, most recent first
     df = merged[
         (~merged["on_girder"])
         | (merged["consume_status"] == "failed")
         | (merged["produce_status"] != "completed")
-    ].reset_index(drop=True)
+    ].sort_values("produced_start", ascending=False, na_position="last").reset_index(drop=True)
     n = len(df)
 
     if n == 0:
@@ -333,36 +336,35 @@ def generate_png(merged, output_path):
     n_cols = len(col_labels)
     cell_w = 1.0
     cell_h = 0.6
-    label_w = 6.0  # width reserved for file labels on the left
-    timing_w = 1.5  # width reserved for total timing label on the right
+    label_w = 6.0   # width reserved for file labels on the left
+    date_w  = 1.4   # width for produced-at date
+    timing_w = 1.2  # width for total time
 
-    fig_w = label_w + n_cols * cell_w + timing_w + 0.4
+    fig_w = label_w + date_w + n_cols * cell_w + timing_w + 0.4
     fig_h = max(4.0, n * cell_h + 2.0)
 
     fig, ax = plt.subplots(figsize=(fig_w, fig_h))
-    ax.set_xlim(-label_w, n_cols * cell_w + timing_w)
+    ax.set_xlim(-label_w, date_w + n_cols * cell_w + timing_w)
     ax.set_ylim(0, n * cell_h)
     ax.axis("off")
 
     # Column headers
+    ax.text(
+        date_w / 2, n * cell_h + 0.15, "Produced at",
+        ha="center", va="bottom", fontsize=7, fontweight="bold", color="#555555",
+    )
     for col_idx, label in enumerate(col_labels):
         ax.text(
-            col_idx * cell_w + cell_w / 2,
+            date_w + col_idx * cell_w + cell_w / 2,
             n * cell_h + 0.15,
             label,
-            ha="center",
-            va="bottom",
-            fontsize=8,
-            fontweight="bold",
+            ha="center", va="bottom", fontsize=8, fontweight="bold",
         )
     ax.text(
-        n_cols * cell_w + timing_w / 2,
+        date_w + n_cols * cell_w + timing_w / 2,
         n * cell_h + 0.15,
         "Total time",
-        ha="center",
-        va="bottom",
-        fontsize=8,
-        fontweight="bold",
+        ha="center", va="bottom", fontsize=8, fontweight="bold",
     )
 
     for row_idx, (_, row) in enumerate(df.iterrows()):
@@ -371,25 +373,22 @@ def generate_png(merged, output_path):
         # File label
         fname = row["filename"]
         label = fname if len(fname) <= 55 else "…" + fname[-52:]
+        ax.text(-0.1, y + cell_h / 2, label, ha="right", va="center", fontsize=5)
+
+        # Produced-at date
+        ts = row.get("produced_start")
+        ts_str = ts.strftime("%Y-%m-%d %H:%M") if pd.notna(ts) else "—"
         ax.text(
-            -0.1,
-            y + cell_h / 2,
-            label,
-            ha="right",
-            va="center",
-            fontsize=5,
+            date_w / 2, y + cell_h / 2, ts_str,
+            ha="center", va="center", fontsize=5, color="#555555",
         )
 
         # Stage cells
         for col_idx, (label, color_fn) in enumerate(zip(col_labels, color_fns)):
             color = color_fn(row)
             rect = plt.Rectangle(
-                (col_idx * cell_w, y),
-                cell_w,
-                cell_h,
-                color=color,
-                ec="white",
-                lw=0.5,
+                (date_w + col_idx * cell_w, y), cell_w, cell_h,
+                color=color, ec="white", lw=0.5,
             )
             ax.add_patch(rect)
 
@@ -397,13 +396,10 @@ def generate_png(merged, output_path):
         total_s = row.get("total_duration_s")
         total_label = _fmt_duration(total_s)
         ax.text(
-            n_cols * cell_w + timing_w / 2,
+            date_w + n_cols * cell_w + timing_w / 2,
             y + cell_h / 2,
             total_label,
-            ha="center",
-            va="center",
-            fontsize=6,
-            color="#333333",
+            ha="center", va="center", fontsize=6, color="#333333",
         )
 
     # Legend
